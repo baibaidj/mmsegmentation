@@ -323,11 +323,15 @@ def load_checkpoint(model,
     if state_dict.get('absolute_pos_embed') is not None:
         absolute_pos_embed = state_dict['absolute_pos_embed']
         N1, L, C1 = absolute_pos_embed.size()
-        N2, C2, H, W = model.absolute_pos_embed.size()
-        if N1 != N2 or C1 != C2 or L != H*W:
+        N2, C2, *spatial_shape= model.absolute_pos_embed.size()
+        if len(spatial_shape) == 3: is_3d, spatial_dim = True, 3
+        else: is_3d, spatial_dim = False, 2
+
+        if N1 != N2 or C1 != C2 or L != torch.prod(spatial_vol):
             logger.warning("Error in loading absolute_pos_embed, pass")
         else:
-            state_dict['absolute_pos_embed'] = absolute_pos_embed.view(N2, H, W, C2).permute(0, 3, 1, 2)
+            permute_order = (0, 4, 1, 2, 3) if is_3d else (0, 3, 1, 2)
+            state_dict['absolute_pos_embed'] = absolute_pos_embed.view(N2, *spatial_shape, C2).permute(*permute_order)
 
     # interpolate position bias table if needed
     relative_position_bias_table_keys = [k for k in state_dict.keys() if "relative_position_bias_table" in k]
@@ -340,11 +344,11 @@ def load_checkpoint(model,
             logger.warning(f"Error in loading {table_key}, pass")
         else:
             if L1 != L2:
-                S1 = int(L1 ** 0.5)
-                S2 = int(L2 ** 0.5)
+                S1 = int(round(L1 ** (1/3))) if is_3d else int(L1 ** 0.5) 
+                S2 = int(round(L2 ** (1/3))) if is_3d else int(L2 ** 0.5) 
                 table_pretrained_resized = F.interpolate(
-                     table_pretrained.permute(1, 0).view(1, nH1, S1, S1),
-                     size=(S2, S2), mode='bicubic')
+                     table_pretrained.permute(1, 0).view(1, nH1, *[S1]*spatial_dim),
+                     size=[S2]*spatial_dim, mode='bicubic')
                 state_dict[table_key] = table_pretrained_resized.view(nH2, L2).permute(1, 0)
 
     # load state_dict
