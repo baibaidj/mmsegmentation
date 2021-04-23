@@ -27,6 +27,8 @@ ENV_XDG_CACHE_HOME = 'XDG_CACHE_HOME'
 DEFAULT_CACHE_DIR = '~/.cache'
 
 
+print_tensor = lambda name, x : print(name, type(x), x.shape, x.dtype, x.min(), x.max())
+
 def _get_mmcv_home():
     mmcv_home = os.path.expanduser(
         os.getenv(

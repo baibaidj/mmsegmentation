@@ -17,7 +17,6 @@ from mmseg.utils import get_root_logger
 from ..builder import BACKBONES
 from torch.nn.modules.utils import _ntuple, _triple
 
-
 class Mlp(nn.Module):
     """ Multilayer perceptron."""
 
@@ -91,7 +90,7 @@ class WindowAttention3d(nn.Module):
         super().__init__()
         self.dim = dim
         self.window_size = window_size  # Wh, Ww, Wd
-        self.window_volume = np.prob(self.window_size)
+        self.window_volume = np.prod(self.window_size)
         self.num_heads = num_heads
         head_dim = dim // num_heads
         self.scale = qk_scale or head_dim ** -0.5
@@ -392,7 +391,7 @@ class BasicLayer3d(nn.Module):
         Hp = window_based_pad(H)
         Wp = window_based_pad(W)
         Dp = window_based_pad(D)
-        img_mask = torch.zeros((1, Hp, Wp, Dp, 1), device=x.device)  # 1 Hp Wp Dp 1
+        img_mask = torch.zeros((1, Hp, Wp, Dp, 1), device=x.device, dtype = x.dtype)  # 1 Hp Wp Dp 1
         h_slices = w_slices = d_slices = (slice(0, -self.window_size),
                                           slice(-self.window_size, -self.shift_size),
                                           slice(-self.shift_size, None))
@@ -417,7 +416,7 @@ class BasicLayer3d(nn.Module):
             else:
                 x = blk(x, attn_mask)
         if self.downsample is not None:
-            x_down = self.downsample(x, H, W)
+            x_down = self.downsample(x, H, W, D)
             Wh, Ww, Wd = (H + 1) // 2, (W + 1) // 2, (D + 1) //2
             return x, H, W, D, x_down, Wh, Ww, Wd
         else:
@@ -539,7 +538,7 @@ class SwinTransformer3d(nn.Module):
             patch_size = _triple(patch_size)
             patches_resolution = [pretrain_img_size[i] // patch_size[i] for i in range(3)]
 
-            self.absolute_pos_embed = nn.Parameter(torch.zeros(1, embed_dim, patches_resolution[0], patches_resolution[1], patches_resolution[2])) 
+            self.absolute_pos_embed = nn.Parameter(torch.zeros(1, embed_dim, patches_resolution[0], patches_resolution[1], patches_resolution[2]))
             trunc_normal_(self.absolute_pos_embed, std=.02)
 
         self.pos_drop = nn.Dropout3d(p=drop_rate)
@@ -623,14 +622,14 @@ class SwinTransformer3d(nn.Module):
     def forward(self, x):
         """Forward function."""
         x = self.patch_embed(x)
-
-        iB, Wh, Ww, Wd, iC = x.shape # 1/4, 1/4
+        iB, iC, Wh, Ww, Wd = x.shape # 1/4, 1/4
         if self.ape:
             # interpolate the position embedding to the corresponding size
             absolute_pos_embed = F.interpolate(self.absolute_pos_embed, size=(Wh, Ww, Wd), mode='bicubic')
-            x = (x + absolute_pos_embed).view(iB, Wh* Ww* Wd, -1).transpose(1, 2)  # B Wh*Ww C
+            x = (x + absolute_pos_embed).view(iB, -1, Wh* Ww* Wd).permute(0, 2, 1)  # B Wh*Ww*Wd C
         else:
-            x = x.view(iB, Wh* Ww* Wd, -1).transpose(1, 2)
+            # print_tensor('InitEmbed', x)
+            x = x.view(iB, -1, Wh* Ww* Wd).permute(0, 2, 1)
         x = self.pos_drop(x)
 
         outs = []
@@ -648,5 +647,5 @@ class SwinTransformer3d(nn.Module):
 
     def train(self, mode=True):
         """Convert the model into training mode while keep layers freezed."""
-        super(SwinTransformer, self).train(mode)
+        super(SwinTransformer3d, self).train(mode)
         self._freeze_stages()
